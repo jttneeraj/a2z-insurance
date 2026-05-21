@@ -1,0 +1,19 @@
+🚀 A2Z Insurance Service deployed successfully!
+
+📦 Release: {{ .Release.Name }}
+📍 Namespace: {{ .Release.Namespace }}
+🏷️  Version: {{ .Values.image.tag | default .Chart.AppVersion }}
+
+{{- if .Values.ingress.enabled }}
+🌐 URL: https://{{ (index .Values.ingress.hosts 0).host }}{{ (index (index .Values.ingress.hosts 0).paths 0).path }}
+{{- end }}
+
+📋 Verify deployment:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "a2z-insurance.name" . }}
+  kubectl logs -f deployment/{{ include "a2z-insurance.fullname" . }} -n {{ .Release.Namespace }}
+
+🔍 Check ingress:
+  kubectl get ingress -n {{ .Release.Namespace }}
+
+📊 Check HPA:
+  kubectl get hpa -n {{ .Release.Namespace }}

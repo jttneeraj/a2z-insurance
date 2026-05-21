@@ -1,0 +1,31 @@
+version: 0.0
+os: linux
+files:
+  - source: /
+    destination: /var/www/node/a2z-insurance/newrelease
+    overwrite: true
+permissions:
+  - object: /var/www/node/a2z-insurance
+    pattern: "**"
+    owner: ubuntu
+    group: ubuntu
+    type:
+      - directory
+      - file    
+hooks:
+  BeforeInstall:
+    - location: scripts/install_dependencies.sh
+      timeout: 900
+      runas: ubuntu
+  AfterInstall:
+    - location: scripts/setup_app.sh
+      timeout: 900
+      runas: ubuntu
+  ApplicationStart:    
+    - location: scripts/start_server.sh
+      timeout: 900
+      runas: ubuntu
+  ApplicationStop:
+    - location: scripts/stop_server.sh
+      timeout: 900
+      runas: ubuntu

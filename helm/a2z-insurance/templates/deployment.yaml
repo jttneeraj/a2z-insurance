@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "a2z-insurance.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "a2z-insurance.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "a2z-insurance.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "a2z-insurance.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "a2z-insurance.serviceAccountName" . }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "a2z-insurance.fullname" . }}-config
+            - secretRef:
+                name: {{ .Values.secrets.existingSecret }}
+            {{- if .Values.secrets.includeDoSpacesSecret }}
+            - secretRef:
+                name: {{ .Values.secrets.doSpacesSecretName }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.health.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.health.livenessInitialDelaySeconds }}
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.health.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.health.readinessInitialDelaySeconds }}
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

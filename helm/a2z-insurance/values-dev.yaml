@@ -1,0 +1,128 @@
+# Dev Environment Values for a2z-insurance
+# Namespace: a2z-dev
+
+replicaCount: 1
+
+image:
+  repository: registry.digitalocean.com/a2z-registry-non-prod/a2z-insurance
+  pullPolicy: Always
+  tag: "0.0.1-dev"
+
+imagePullSecrets:
+  - name: do-registry-credentials
+
+serviceAccount:
+  create: true
+  name: "a2z-insurance-sa"
+
+service:
+  type: ClusterIP
+  port: 4015
+  targetPort: 4015
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    # Rewrite /insurance/xxx to /xxx
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+  hosts:
+    - host: dev.a2zsuvidhaa.in
+      paths:
+        - path: /insurance(/|$)(.*)
+          pathType: ImplementationSpecific
+  tls:
+    - hosts:
+        - dev.a2zsuvidhaa.in
+      secretName: dev.a2zsuvidhaa.in-tls
+
+resources:
+  limits:
+    cpu: 300m
+    memory: 512Mi
+  requests:
+    cpu: 50m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 2
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 75
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+nodeSelector:
+  env: staging
+
+affinity: {}
+
+config:
+  APP_NAME: "INSURANCE"
+  APP_PORT: "4015"
+  APP_VERSION: "1.0.0"
+  NODE_ENV: "development"
+  APP_MODE: "STAGING"
+  API_CALL_MODE: "UAT"
+
+  # DB values copied from callback dev Helm values
+  MYSQL_DB_HOST: "proxysql.a2z-dev.svc.cluster.local"
+  MYSQL_DB_PORT: "6033"
+  MYSQL_DB_NAME: "a2z_dev"
+  MYSQL_DB_USER: "staging_user"
+  MYSQL_DATETIME_FORMAT: "YYYY-MM-DD H:mm:ss"
+  MYSQL_DATE_FORMAT: "YYYY-MM-DD"
+  MYSQL_DB_LOG_HOST: "proxysql.a2z-dev.svc.cluster.local"
+  MYSQL_DB_LOG_PORT: "6033"
+  MYSQL_DB_LOG_NAME: "a2z_dev_log"
+  MYSQL_DB_LOG_USER: "staging_user"
+
+  REDIS_HOST: "redis.a2z-redis.svc.cluster.local"
+  REDIS_PORT: "6379"
+  REDIS_URI: "redis://redis.a2z-redis.svc.cluster.local:6379"
+
+  ALLOWED_HOST: "http://localhost:3000,https://dev.a2zsuvidhaa.in"
+  CLIENT_APP_URL: "https://dev.a2zsuvidhaa.in"
+  APP_URL: "https://dev.a2zsuvidhaa.in"
+  INSURANCE_BASE_URL: "https://dev.a2zsuvidhaa.in/insurance/"
+
+  AWS_REGION: "ap-south-1"
+  AWS_BUCKET_NAME: "a2z-dev"
+  AWS_TEMP_BUCKET_NAME: "a2z-dev"
+
+  ENABLE_RATE_LIMIT: "false"
+  SHARED_LIBRARY_PATH: "shared-library"
+  DEFAULT_RECORD_LIMIT: "10"
+  NODE_OPTIONS: "--max-old-space-size=384"
+
+  IP_ADDRESS: "127.0.0.1"
+  LATITUDE: "26.2287727"
+  LONGITUTE: "73.0053721"
+
+  # Internal microservice URLs copied from callback dev Helm values
+  MS_API_SERVER_URL: "http://a2z-api-server.a2z-dev.svc.cluster.local:4001"
+  MS_RECHARGE_URL: "http://a2z-recharge-svc.a2z-dev.svc.cluster.local:4002"
+  MS_PAYOUT_URL: "http://a2z-payout-svc.a2z-dev.svc.cluster.local:4003"
+  MS_COMMON_API_URL: "http://a2z-common-api-svc.a2z-dev.svc.cluster.local:4006"
+  MS_PAYMENT_GATEWAY_URL: "http://a2z-payment-gateway-svc.a2z-dev.svc.cluster.local:4011"
+  MS_PROCESS_URL: "http://a2z-process-svc.a2z-dev.svc.cluster.local:4012"
+  MS_AEPS_API_URL: "http://a2z-aeps-svc.a2z-dev.svc.cluster.local:4013"
+
+secrets:
+  existingSecret: "a2z-api-server-secrets"
+  includeDoSpacesSecret: true
+  doSpacesSecretName: "do-spaces-secrets"
+
+health:
+  path: /ping
+  livenessInitialDelaySeconds: 30
+  readinessInitialDelaySeconds: 10

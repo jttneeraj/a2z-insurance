@@ -1,0 +1,94 @@
+name: CD - Deploy Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  REGISTRY: registry.digitalocean.com
+  REGISTRY_NAME: a2z-registry-non-prod
+  IMAGE_NAME: insurance
+  NAMESPACE: a2z-prod
+  CLUSTER_NAME: a2z-non-prod-k8s
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy to Production
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://a2zsuvidhaa.in/insurance/
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get version from properties
+        id: version
+        run: |
+          VERSION=$(grep 'build.version=' version.properties | cut -d'=' -f2)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Version: $VERSION"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DigitalOcean Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          password: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+          no-cache: true
+          build-args: |
+            GITHUB_TOKEN=${{ secrets.GH_PAT }}
+            CACHEBUST=${{ github.run_id }}
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Setup kubectl
+        run: doctl kubernetes cluster kubeconfig save ${{ env.CLUSTER_NAME }}
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.0'
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install a2z-insurance ./helm/a2z-insurance \
+            --namespace ${{ env.NAMESPACE }} \
+            --create-namespace \
+            --values ./helm/a2z-insurance/values-prod.yaml \
+            --set image.tag=${{ steps.version.outputs.version }} \
+            --wait \
+            --timeout 5m
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/a2z-insurance -n ${{ env.NAMESPACE }} --timeout=3m
+          kubectl get pods -n ${{ env.NAMESPACE }} -l app.kubernetes.io/name=a2z-insurance
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### 🚀 Production Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | \`${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| URL | https://a2zsuvidhaa.in/insurance/ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image | \`${{ env.REGISTRY }}/${{ env.REGISTRY_NAME }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY

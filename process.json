@@ -1,0 +1,20 @@
+{
+    "apps": [
+        {
+            "name": "a2z-insurance",
+            "script": "app.js",
+            "cwd": "/var/www/node/a2z-insurance/current",
+            "log_date_format": "YYYY-MM-DD HH:mm Z",
+            "env": {
+                "NODE_ENV": "production",
+                "PORT": 4015
+            },
+            "watch": false,
+            "ignore_watch": [  
+                "*"
+            ]
+        }
+    ]
+}      
+
+

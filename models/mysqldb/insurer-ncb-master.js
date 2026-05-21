@@ -1,0 +1,21 @@
+const {
+    MysqlInsurerNcbMasterModel,
+    mysqldb,
+} = require(process.env.SHARED_LIBRARY_PATH + "/services/models");
+
+class InsurerNcbMasterModel extends MysqlInsurerNcbMasterModel {
+    constructor() {
+        super();
+    }
+
+    findByQuery(conditions) {
+        return this.model.findOne({
+            where: conditions,
+        });
+    }
+}
+
+module.exports = {
+    mysqldb,
+    MysqlInsurerNcbMasterModel: new InsurerNcbMasterModel(),
+};
