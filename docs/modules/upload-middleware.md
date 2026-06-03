@@ -10,14 +10,15 @@ The application needs to accept file uploads in at least two places: the master-
 
 ## When this module runs / is used
 
-**In practice: never.** No route file currently imports `uploadFile` from `middlewares/upload.js`. The two active file-upload routes define their own inline Multer instances instead:
+**In practice: never.** No route file currently imports `uploadFile` from `middlewares/upload.js`. The active file-upload routes each define their own inline Multer instances instead:
 
 - `routes/master-import.js` — creates its own `multer({ dest: "uploads/master-files/", fileFilter: ... })` and uses it directly on `POST /api/admin/master/master-file-import`.
 - `routes/commission-grid.js` — creates its own `multer({ dest: "uploads/commission-grid/" })` and uses it directly on `POST /api/admin/commission-grid/import`.
+- `routes/index.js` — creates its own `multer({ storage: diskStorage })` saving to `public/storage/temp` (test endpoint only).
 
-Additionally, `app.js` creates a third Multer memory-storage instance (lines 102–105) but has the `app.use(upload.any())` call commented out.
+Additionally, `app.js` creates a fourth Multer memory-storage instance (lines 102–105) but has the `app.use(upload.any())` call commented out.
 
-The result is three separate, independent Multer configurations for a feature that could be served by one shared module.
+The result is four separate, independent Multer configurations for a feature that could be served by one shared module.
 
 ## How it fits in
 
@@ -40,7 +41,7 @@ The result is three separate, independent Multer configurations for a feature th
 
 ### 1. Dead code — `middlewares/upload.js` is never imported
 
-- **What**: Either wire `uploadFile` into the two active routes that need it, or delete the file entirely and document the per-route inline Multer pattern as the accepted approach.
+- **What**: Either wire `uploadFile` into the active routes that need it, or delete the file entirely and document the per-route inline Multer pattern as the accepted approach.
 - **Why**: Dead code misleads future maintainers into thinking uploads are configured centrally when they are not, and the file contains a crash-on-call bug (see item 2) that would surface the moment someone attempts to re-use it.
 - **When**: Now
 - **Where**: `middlewares/upload.js` (entire file); `routes/master-import.js` lines 7–40; `routes/commission-grid.js` lines 4–11
@@ -56,16 +57,25 @@ The result is three separate, independent Multer configurations for a feature th
 
 ---
 
-### 3. No file size limit on any upload endpoint
+### 3. Filename path traversal risk
 
-- **What**: Add a `limits: { fileSize: <N> }` option to each Multer instance. A value of 10–20 MB is appropriate for Excel/TXT files used as data imports; the commission-grid importer would rarely exceed 5 MB.
-- **Why**: Without a size cap, a client (authenticated or not) can exhaust server disk space or memory by uploading arbitrarily large files. This is the most common Denial-of-Service vector for file-upload endpoints.
-- **When**: Now
-- **Where**: `routes/master-import.js` line 7 (`multer({ dest: ..., fileFilter: ... })` → add `limits`); `routes/commission-grid.js` line 9 (`multer({ dest: ... })` → add `limits`)
+- **What**: Wrap `file.originalname` with `path.basename()` before using it in the stored filename: `` `${Date.now()}-${path.basename(file.originalname)}` ``.
+- **Why**: If a client sends a crafted filename containing `../`, the raw concatenation could write the file outside the intended uploads directory. `path.basename` strips directory components and neutralises this risk.
+- **When**: Now (security)
+- **Where**: `middlewares/upload.js` line 19
 
 ---
 
-### 4. `commission-grid.js` has no file-type filter
+### 4. No file size limit on any upload endpoint
+
+- **What**: Add a `limits: { fileSize: <N> }` option to each Multer instance. A value of 10–20 MB is appropriate for Excel/TXT files used as data imports.
+- **Why**: Without a size cap, a client can exhaust server disk space or memory by uploading arbitrarily large files. This is the most common Denial-of-Service vector for file-upload endpoints.
+- **When**: Now
+- **Where**: `routes/master-import.js` line 7; `routes/commission-grid.js` line 9
+
+---
+
+### 5. `commission-grid.js` has no file-type filter
 
 - **What**: Add a `fileFilter` to the commission-grid Multer instance that restricts uploads to `.xlsx` files, matching the actual data the controller expects.
 - **Why**: Without a filter, any file type — including executables or scripts — is accepted and written to disk at `uploads/commission-grid/`. While the controller will ultimately reject non-Excel content at parse time, the file is already on disk by then.
@@ -74,33 +84,43 @@ The result is three separate, independent Multer configurations for a feature th
 
 ---
 
-### 5. Uploaded temp files are never deleted
+### 6. Uploaded temp files are never deleted
 
-- **What**: After each successful import, delete the temp file from `uploads/master-files/` or `uploads/commission-grid/` (use `fs.unlink(req.file.path, cb)` or `fs.promises.unlink(req.file.path)` in the controller's finally block).
-- **Why**: Every import run leaves a file on disk permanently. On a busy instance these directories will grow without bound, eventually filling the disk. This is especially risky for the commission-grid endpoint which has no file-type filter.
+- **What**: After each successful import, delete the temp file (use `fs.promises.unlink(req.file.path)` in the controller's `finally` block).
+- **Why**: Every import run leaves a file on disk permanently. On a busy instance these directories will grow without bound.
 - **When**: Next quarter
 - **Where**: `controllers/import-master.js` (end of `importMasterXlsx`); `controllers/commission-grid.js` (end of `importCommissionGrid`)
 
 ---
 
-### 6. Debug artifact in filename template
+### 7. Debug log left in filename callback
 
-- **What**: Remove the `-palo-` literal from the filename template on line 19 of `upload.js`: `\`${Date.now()}-palo-${file.originalname}\`` should be `\`${Date.now()}-${file.originalname}\``.
+- **What**: Remove the `console.log(file.originalname)` on line 18.
+- **Why**: Debug output leaks internal file names to production stdout logs.
+- **When**: Nice to have (only matters if this file is ever reactivated)
+- **Where**: `middlewares/upload.js` line 18
+
+---
+
+### 8. Debug artifact in filename template
+
+- **What**: Remove the `-palo-` literal from the filename template on line 19: `` `${Date.now()}-palo-${file.originalname}` `` should drop the `palo` segment.
 - **Why**: The string is clearly a developer-era debug tag; it would surface in file paths and logs if this middleware were ever reactivated.
 - **When**: Nice to have (only matters if the file is kept and activated)
 - **Where**: `middlewares/upload.js` line 19
 
 ---
 
-### 7. Three separate Multer configurations with no shared constants
+### 9. Three separate Multer configurations with no shared constants
 
-- **What**: If the centralised-middleware approach is kept, extract common options (allowed MIME types, size limit, temp-file root path) into `constants/common.js` or a dedicated `config/upload.js` file so all upload points share one source of truth.
+- **What**: Extract common options (allowed MIME types, size limit, temp-file root path) into `constants/common.js` or a dedicated `config/upload.js` file so all upload points share one source of truth.
 - **Why**: Currently the allowed-type list in `upload.js` (PDF + Excel) diverges from `master-import.js` (xlsx + txt only), and `commission-grid.js` allows everything. Divergence will grow as more upload endpoints are added.
 - **When**: Next quarter
 - **Where**: `middlewares/upload.js`, `routes/master-import.js`, `routes/commission-grid.js`
 
 ## Open questions
 
-1. **Intended destination path**: `upload.js` saves to `public/uploads/` while the `.gitignore` preserves a `.keep` file at `public/storage/uploads/`. Is `public/storage/uploads/` the canonical upload directory, or is `public/uploads/` correct?
+1. **Intended destination path**: `upload.js` saves to `public/uploads/` while `routes/index.js` saves to `public/storage/temp`. Is `public/uploads/` or `public/storage/uploads/` the canonical upload directory?
 2. **`__basedir` convention**: Is there a plan to set `global.__basedir = __dirname` in `app.js` (a pattern used in some Express boilerplates)? If so, `upload.js` line 14 would work once that assignment is added; if not, the reference should be replaced with `__dirname`.
-3. **Upload retention policy**: Should uploaded master-data files be retained for audit/replay purposes, or are they meant to be ephemeral temp files? The answer determines whether cleanup (item 5) is safe to add.
+3. **Upload retention policy**: Should uploaded master-data files be retained for audit/replay purposes, or are they meant to be ephemeral temp files? The answer determines whether cleanup (item 6) is safe to add.
+4. **Why was this file not deleted or adopted?** Was `middlewares/upload.js` an abandoned consolidation attempt, or is there a plan to wire it into a future upload endpoint (e.g. KYC document uploads)?
